@@ -1,0 +1,17 @@
+# Gold RWA Token Pipeline — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# HTTP client
+requests>=2.31.0
+
+# Ethereum / Web3 (Chainlink PoR contract calls)
+web3>=6.15.0
+
+# PostgreSQL adapter
+psycopg2-binary>=2.9.9
+
+# Timezone support (Python 3.9+ stdlib zoneinfo needs tzdata on some systems)
+tzdata>=2024.1
+
+# Optional: schedule / APScheduler for daemon mode (alternative to --daemon loop)
+# APScheduler>=3.10.0
