@@ -10,6 +10,9 @@ interface DeFiLlamaPool {
   apyBase: number;
   apyReward: number | null;
   tvlUsd: number;
+  apyPct7D: number | null;
+  apyMean30d: number | null;
+  url: string;
 }
 
 export async function fetchAaveYields(): Promise<YieldObject[]> {
@@ -33,18 +36,21 @@ export async function fetchAaveYields(): Promise<YieldObject[]> {
     return pools.map((pool) => ({
       id: `aave-v3-${pool.symbol.toLowerCase()}-${pool.chain.toLowerCase()}`,
       platform: "Aave",
+      projectSlug: "aave-v3",
       asset: pool.symbol,
       type: "DeFi" as const,
+      chain: pool.chain,
       apy: pool.apy ?? 0,
       baseApy: pool.apyBase ?? 0,
       incentiveApy: pool.apyReward ?? 0,
+      apy7dChange: pool.apyPct7D ?? null,
+      apy30d: pool.apyMean30d ?? null,
+      tvlUsd: pool.tvlUsd ?? null,
+      tvl7dChange: null,
       riskScore: 2 as const,
       referralUrl: null,
-      tags: [
-        pool.chain,
-        "Overcollateralized",
-        ...(pool.apyReward ? ["Incentivized"] : []),
-      ],
+      deepLink: pool.url ?? "https://app.aave.com",
+      tags: ["Overcollateralized", ...(pool.apyReward ? ["Incentivized"] : [])],
       riskFactors: ["Smart Contract Risk", "Oracle Risk", "Liquidation Risk"],
     }));
   } catch {
@@ -52,14 +58,21 @@ export async function fetchAaveYields(): Promise<YieldObject[]> {
       {
         id: "aave-v3-usdc-ethereum",
         platform: "Aave",
+        projectSlug: "aave-v3",
         asset: "USDC",
         type: "DeFi",
+        chain: "Ethereum",
         apy: 4.8,
         baseApy: 4.8,
         incentiveApy: 0,
+        apy7dChange: null,
+        apy30d: null,
+        tvlUsd: null,
+        tvl7dChange: null,
         riskScore: 2,
         referralUrl: null,
-        tags: ["Ethereum", "Overcollateralized"],
+        deepLink: "https://app.aave.com",
+        tags: ["Overcollateralized"],
         riskFactors: ["Smart Contract Risk", "Oracle Risk", "Liquidation Risk"],
       },
     ];

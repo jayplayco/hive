@@ -4,66 +4,130 @@ import { Fragment, useState } from "react";
 import type { YieldObject } from "@/types/yield";
 import { RiskCard } from "./RiskCard";
 import { YieldBreakdownTooltip } from "./YieldBreakdownTooltip";
-import { ArrowUpDown, ExternalLink, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ArrowUpDown,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+} from "lucide-react";
 
-type SortKey = "apy" | "riskScore" | "asset" | "platform" | "type";
+type SortKey = "apy" | "riskScore" | "asset" | "platform" | "tvlUsd" | "apy7dChange";
 type SortDir = "asc" | "desc";
 
 interface Props {
   items: YieldObject[];
 }
 
-const TYPE_BADGE: Record<string, string> = {
-  DeFi: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
-  CEX: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300",
-  RWA: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300",
-  Options: "bg-pink-100 text-pink-700 dark:bg-pink-900/50 dark:text-pink-300",
+// ── Formatting helpers ──────────────────────────────────────────────────────
+
+function formatTvl(v: number | null): string {
+  if (v === null) return "—";
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  return `$${v.toFixed(0)}`;
+}
+
+function ChangeCell({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-gray-600">—</span>;
+  if (Math.abs(value) < 0.05)
+    return <span className="text-gray-400 flex items-center gap-0.5"><Minus className="w-3 h-3" /> 0.0%</span>;
+  const pos = value > 0;
+  return (
+    <span className={`flex items-center gap-0.5 font-medium ${pos ? "text-green-400" : "text-red-400"}`}>
+      {pos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+      {pos ? "+" : ""}{value.toFixed(1)}%
+    </span>
+  );
+}
+
+// ── Protocol logo with DeFiLlama CDN + letter fallback ────────────────────
+
+const LOGO_COLORS = [
+  "bg-blue-700", "bg-purple-700", "bg-emerald-700",
+  "bg-orange-700", "bg-pink-700", "bg-indigo-700",
+  "bg-red-700", "bg-teal-700", "bg-yellow-700",
+];
+
+function logoColor(name: string): string {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return LOGO_COLORS[h % LOGO_COLORS.length];
+}
+
+function ProtocolLogo({ slug, name }: { slug: string; name: string }) {
+  const [err, setErr] = useState(false);
+  if (err) {
+    return (
+      <div className={`w-8 h-8 rounded-full ${logoColor(name)} flex items-center justify-center text-xs font-bold text-white shrink-0`}>
+        {name.slice(0, 2).toUpperCase()}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={`https://icons.llama.fi/icons/protocols/${slug}.png`}
+      alt={name}
+      width={32}
+      height={32}
+      className="w-8 h-8 rounded-full object-cover bg-gray-800 shrink-0"
+      onError={() => setErr(true)}
+    />
+  );
+}
+
+// ── Category + tag badges ─────────────────────────────────────────────────
+
+const TYPE_STYLE: Record<string, string> = {
+  DeFi:    "bg-blue-500/15 text-blue-400 border border-blue-500/25",
+  CEX:     "bg-purple-500/15 text-purple-400 border border-purple-500/25",
+  RWA:     "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25",
+  Options: "bg-pink-500/15 text-pink-400 border border-pink-500/25",
 };
 
-const RISK_BADGE: Record<number, string> = {
-  1: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  2: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  3: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
-  4: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  5: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+const HIGHLIGHT_TAGS = new Set(["Boosted", "T-Bill Backed", "Locked 30D", "Overcollateralized", "Incentivized", "Real-World Credit"]);
+const TAG_STYLE: Record<string, string> = {
+  "Boosted":            "bg-amber-500/15 text-amber-400 border border-amber-500/25",
+  "Incentivized":       "bg-amber-500/15 text-amber-400 border border-amber-500/25",
+  "T-Bill Backed":      "bg-green-500/15 text-green-400 border border-green-500/25",
+  "Locked 30D":         "bg-orange-500/15 text-orange-400 border border-orange-500/25",
+  "Overcollateralized": "bg-indigo-500/15 text-indigo-400 border border-indigo-500/25",
+  "Real-World Credit":  "bg-teal-500/15 text-teal-400 border border-teal-500/25",
 };
 
-const RISK_LABELS: Record<number, string> = {
-  1: "1 — Very Low",
-  2: "2 — Low",
-  3: "3 — Medium",
-  4: "4 — High",
-  5: "5 — Very High",
-};
+function CategoryBadges({ item }: { item: YieldObject }) {
+  const highlight = item.tags.filter((t) => HIGHLIGHT_TAGS.has(t));
+  return (
+    <div className="flex flex-wrap gap-1 min-w-0">
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${TYPE_STYLE[item.type] ?? "bg-gray-700 text-gray-300"}`}>
+        {item.type}
+      </span>
+      {highlight.slice(0, 2).map((t) => (
+        <span key={t} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${TAG_STYLE[t] ?? "bg-gray-700 text-gray-400"}`}>
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
 
-function SortButton({
-  col,
-  active,
-  dir,
-  onClick,
-}: {
-  col: SortKey;
-  active: SortKey;
-  dir: SortDir;
-  onClick: (key: SortKey) => void;
-}) {
+// ── Sort button ───────────────────────────────────────────────────────────
+
+function SortBtn({ col, active, dir, onClick }: { col: SortKey; active: SortKey; dir: SortDir; onClick: (k: SortKey) => void }) {
   return (
     <button
       onClick={() => onClick(col)}
-      className={`inline-flex items-center transition-colors ${
-        active === col
-          ? "text-indigo-600 dark:text-indigo-400"
-          : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-      }`}
-      aria-label={`Sort by ${col}`}
+      className={`transition-colors ${active === col ? "text-indigo-400" : "text-gray-600 hover:text-gray-400"}`}
     >
       <ArrowUpDown className="w-3 h-3" />
-      {active === col && (
-        <span className="text-[10px] ml-0.5">{dir === "asc" ? "↑" : "↓"}</span>
-      )}
     </button>
   );
 }
+
+// ── Main component ────────────────────────────────────────────────────────
 
 export function YieldTable({ items }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("apy");
@@ -71,179 +135,159 @@ export function YieldTable({ items }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "apy" ? "desc" : "asc");
-    }
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "apy" || key === "tvlUsd" ? "desc" : "asc"); }
   };
 
   const sorted = [...items].sort((a, b) => {
-    const va = a[sortKey];
-    const vb = b[sortKey];
-    const cmp =
-      typeof va === "number"
-        ? (va as number) - (vb as number)
-        : String(va).localeCompare(String(vb));
+    const va = a[sortKey] ?? -Infinity;
+    const vb = b[sortKey] ?? -Infinity;
+    const cmp = typeof va === "number" ? (va as number) - (vb as number) : String(va).localeCompare(String(vb));
     return sortDir === "asc" ? cmp : -cmp;
   });
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-gray-200 dark:border-gray-700 py-16 text-center text-gray-400 dark:text-gray-500">
-        No yield opportunities match the current filter.
+      <div className="rounded-xl border border-gray-800 py-20 text-center text-gray-500">
+        No results match your filters.
       </div>
     );
   }
 
+  const th = "px-3 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+    <div className="overflow-x-auto rounded-xl border border-gray-800">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/80 text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
+        <thead className="bg-gray-900/60">
           <tr>
-            <th className="px-4 py-3 w-8" />
-            <th className="px-4 py-3 text-left">
-              <span className="flex items-center gap-1.5">
-                Asset
-                <SortButton col="asset" active={sortKey} dir={sortDir} onClick={handleSort} />
-              </span>
+            <th className="w-8 px-3 py-3" />
+            <th className={th}>
+              <span className="flex items-center gap-1">Asset <SortBtn col="asset" active={sortKey} dir={sortDir} onClick={handleSort} /></span>
             </th>
-            <th className="px-4 py-3 text-left">
-              <span className="flex items-center gap-1.5">
-                Platform
-                <SortButton col="platform" active={sortKey} dir={sortDir} onClick={handleSort} />
-              </span>
+            <th className={th}>Chain</th>
+            <th className={th}>
+              <span className="flex items-center gap-1">TVL <SortBtn col="tvlUsd" active={sortKey} dir={sortDir} onClick={handleSort} /></span>
             </th>
-            <th className="px-4 py-3 text-left">
-              <span className="flex items-center gap-1.5">
-                Type
-                <SortButton col="type" active={sortKey} dir={sortDir} onClick={handleSort} />
-              </span>
+            <th className={th}>TVL 7d Δ</th>
+            <th className={th}>Category</th>
+            <th className={`${th} text-right`}>
+              <span className="flex items-center justify-end gap-1">7d APY <SortBtn col="apy" active={sortKey} dir={sortDir} onClick={handleSort} /></span>
             </th>
-            <th className="px-4 py-3 text-right">
-              <span className="flex items-center justify-end gap-1.5">
-                APY
-                <SortButton col="apy" active={sortKey} dir={sortDir} onClick={handleSort} />
-              </span>
-            </th>
-            <th className="px-4 py-3 text-left">
-              <span className="flex items-center gap-1.5">
-                Risk
-                <SortButton col="riskScore" active={sortKey} dir={sortDir} onClick={handleSort} />
-              </span>
-            </th>
-            <th className="px-4 py-3 text-left">Tags</th>
-            <th className="px-4 py-3 text-center">Link</th>
+            <th className={th}>APY 7d Δ</th>
+            <th className={`${th} text-right`}>30d APY</th>
+            <th className={`${th} text-center`}>Earn</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-          {sorted.map((item) => (
-            <Fragment key={item.id}>
-              <tr
-                className="bg-white dark:bg-gray-900 hover:bg-gray-50/70 dark:hover:bg-gray-800/50 cursor-pointer transition-colors"
-                onClick={() =>
-                  setExpandedId(expandedId === item.id ? null : item.id)
-                }
-              >
-                <td className="px-4 py-3 text-gray-400 dark:text-gray-600">
-                  {expandedId === item.id ? (
-                    <ChevronDown className="w-4 h-4" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4" />
-                  )}
-                </td>
-                <td className="px-4 py-3 font-semibold text-gray-900 dark:text-gray-100">
-                  {item.asset}
-                </td>
-                <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                  {item.platform}
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      TYPE_BADGE[item.type] ?? "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {item.type}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <YieldBreakdownTooltip item={item} />
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${
-                      RISK_BADGE[item.riskScore]
-                    }`}
-                  >
-                    {RISK_LABELS[item.riskScore]}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {item.tags.slice(0, 3).map((tag) => (
-                      <span
-                        key={tag}
-                        className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  {item.referralUrl ? (
-                    <a
-                      href={item.referralUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-xs font-medium transition-colors"
-                    >
-                      Open <ExternalLink className="w-3 h-3" />
-                    </a>
-                  ) : (
-                    <span className="text-gray-300 dark:text-gray-700 text-xs">
-                      —
-                    </span>
-                  )}
-                </td>
-              </tr>
+        <tbody className="divide-y divide-gray-800/60">
+          {sorted.map((item) => {
+            const earnUrl = item.referralUrl ?? item.deepLink;
+            return (
+              <Fragment key={item.id}>
+                <tr
+                  className="bg-gray-950 hover:bg-gray-900/70 cursor-pointer transition-colors"
+                  onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                >
+                  {/* Expand toggle */}
+                  <td className="px-3 py-3 text-gray-600">
+                    {expandedId === item.id
+                      ? <ChevronDown className="w-4 h-4" />
+                      : <ChevronRight className="w-4 h-4" />}
+                  </td>
 
-              {expandedId === item.id && (
-                <tr className="bg-gray-50/50 dark:bg-gray-800/30">
-                  <td colSpan={8} className="px-6 py-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <RiskCard item={item} />
-                      {item.tieredRates && item.tieredRates.length > 0 && (
-                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-900">
-                          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                            Tiered Rates
-                          </p>
-                          <div className="space-y-1.5">
-                            {item.tieredRates.map((tier, i) => (
-                              <div
-                                key={i}
-                                className="flex justify-between items-center text-sm"
-                              >
-                                <span className="text-gray-600 dark:text-gray-400">
-                                  {tier.label}
-                                </span>
-                                <span className="font-semibold text-indigo-600 dark:text-indigo-400">
-                                  {tier.apy.toFixed(2)}%
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                  {/* Asset */}
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <ProtocolLogo slug={item.projectSlug} name={item.platform} />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-100 leading-tight">{item.asset}</p>
+                        <p className="text-xs text-gray-500 leading-tight truncate max-w-[120px]">{item.platform}</p>
+                      </div>
                     </div>
                   </td>
+
+                  {/* Chain */}
+                  <td className="px-3 py-3">
+                    <span className="text-xs text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded whitespace-nowrap">
+                      {item.chain}
+                    </span>
+                  </td>
+
+                  {/* TVL */}
+                  <td className="px-3 py-3 text-gray-300 tabular-nums whitespace-nowrap">
+                    {formatTvl(item.tvlUsd)}
+                  </td>
+
+                  {/* TVL 7d Δ */}
+                  <td className="px-3 py-3 tabular-nums">
+                    <ChangeCell value={item.tvl7dChange} />
+                  </td>
+
+                  {/* Category */}
+                  <td className="px-3 py-3">
+                    <CategoryBadges item={item} />
+                  </td>
+
+                  {/* 7d APY */}
+                  <td className="px-3 py-3 text-right">
+                    <YieldBreakdownTooltip item={item} />
+                  </td>
+
+                  {/* APY 7d Δ */}
+                  <td className="px-3 py-3 tabular-nums">
+                    <ChangeCell value={item.apy7dChange} />
+                  </td>
+
+                  {/* 30d APY */}
+                  <td className="px-3 py-3 text-right tabular-nums text-gray-300">
+                    {item.apy30d !== null ? `${item.apy30d.toFixed(2)}%` : "—"}
+                  </td>
+
+                  {/* Earn */}
+                  <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                    {earnUrl ? (
+                      <a
+                        href={earnUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 hover:text-indigo-300 text-xs font-medium border border-indigo-600/30 transition-colors whitespace-nowrap"
+                      >
+                        Earn <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-gray-700 text-xs">—</span>
+                    )}
+                  </td>
                 </tr>
-              )}
-            </Fragment>
-          ))}
+
+                {/* Expanded detail row */}
+                {expandedId === item.id && (
+                  <tr className="bg-gray-900/40">
+                    <td colSpan={10} className="px-6 py-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <RiskCard item={item} />
+                        {item.tieredRates && item.tieredRates.length > 0 && (
+                          <div className="rounded-lg border border-gray-700 p-3 bg-gray-900">
+                            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                              Tiered Rates
+                            </p>
+                            <div className="space-y-1.5">
+                              {item.tieredRates.map((tier, i) => (
+                                <div key={i} className="flex justify-between text-sm">
+                                  <span className="text-gray-400">{tier.label}</span>
+                                  <span className="font-semibold text-indigo-400">{tier.apy.toFixed(2)}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
